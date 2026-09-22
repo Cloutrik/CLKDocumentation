@@ -5,6 +5,19 @@ conteúdo, e instalar o app numa TV (ou num TV box) — incluindo como
 simular um TV box na sua própria máquina antes de mexer num dispositivo
 de verdade.
 
+Ver também [`docs/arquitetura.md`](arquitetura.md) pra uma visão técnica
+dos componentes e como eles se conectam.
+
+- [1. Visão geral](#1-visão-geral)
+- [2. Requisitos](#2-requisitos)
+- [3. Subindo o backend](#3-subindo-o-backend)
+- [4. Primeiro acesso ao painel](#4-primeiro-acesso-ao-painel)
+- [5. Cadastro de conteúdo, grupos e TVs](#5-cadastro-de-conteúdo-grupos-e-tvs)
+- [6. Instalando o app numa TV](#6-instalando-o-app-numa-tv)
+- [7. Headwind MDM (opcional)](#7-headwind-mdm-opcional)
+- [8. Simulando um TV box na sua máquina](#8-simulando-um-tv-box-na-sua-máquina)
+- [9. Troubleshooting](#9-troubleshooting)
+
 ## 1. Visão geral
 
 O CLKCast tem três partes que rodam de forma independente:
@@ -54,6 +67,32 @@ as URLs antigas continuam salvas erradas no banco — corrija na mão
 'http://SEU-IP:9000');` direto no Postgres) ou edite cada item pelo
 painel.
 
+### 3.1. Alternativa: instalar sem clonar o repositório
+
+O comando acima builda `backend`/`frontend` a partir do código-fonte —
+ótimo pra desenvolvimento, mas exige clonar o repositório e ter o
+código na máquina. Pra instalar num servidor novo só com Docker, sem
+precisar do código-fonte, use as imagens já publicadas no Docker Hub
+(`cloutrik/clkcast-backend`, `cloutrik/clkcast-frontend` — ver
+[`docs/arquitetura.md`](arquitetura.md#publicação-das-imagens-docker)):
+
+```bash
+mkdir clkcast && cd clkcast
+curl -O https://raw.githubusercontent.com/Cloutrik/CLKCast/main/docker-compose.prod.yml
+curl -O https://raw.githubusercontent.com/Cloutrik/CLKCast/main/.env.example
+cp .env.example .env   # ajuste os valores antes de produção
+docker compose -f docker-compose.prod.yml up -d postgres backend frontend minio
+```
+
+Funciona igual ao fluxo de build local (mesmas portas, mesmas variáveis
+de ambiente no `.env`) — a diferença é só de onde vêm as imagens de
+`backend`/`frontend`. Pra atualizar depois de uma nova versão publicada:
+
+```bash
+docker compose -f docker-compose.prod.yml pull backend frontend
+docker compose -f docker-compose.prod.yml up -d backend frontend
+```
+
 ## 4. Primeiro acesso ao painel
 
 1. Acesse `http://localhost:8080` (ou o IP do servidor) — vai cair na
@@ -85,10 +124,13 @@ cd android
 ./gradlew assembleDebug
 ```
 
-Gera `android/app/build/outputs/apk/debug/app-debug.apk`. Antes de
-buildar, confira `CLKCAST_API_BASE_URL` em `android/gradle.properties` —
-precisa apontar pro IP real do backend (não `10.0.2.2`, que só funciona
-em emulador).
+Gera `android/app/build/outputs/apk/debug/app-debug.apk`. O endereço do
+backend **não precisa ser configurado antes de buildar** — na primeira
+execução do app, ele mostra uma tela pra digitar o endereço do servidor
+(valida com `GET /health` antes de salvar). `CLKCAST_API_BASE_URL` em
+`android/gradle.properties` só pré-preenche essa tela (conveniência pro
+emulador, default `http://10.0.2.2:8000/`); numa TV real, digite o IP do
+servidor direto na tela quando o app abrir pela primeira vez.
 
 > O build `assembleDebug` serve pra testes/simulação interna. Antes de
 > distribuir de verdade (ex: via Headwind MDM em produção), gere um build
@@ -104,9 +146,11 @@ adb connect <ip-da-tv>:5555      # se for ADB via rede
 adb install app-debug.apk
 ```
 
-Abra o app na TV — ela aparece sozinha na lista do painel como
-"Aguardando pareamento". Clique em "Vincular" na linha dela, dê um nome,
-salve. Pronto — a TV já começa a puxar a playlist.
+Abra o app na TV — na primeira execução ele pede o endereço do servidor
+(digite `http://<ip-do-backend>:8000/` e confirme). Validado o servidor,
+a TV aparece sozinha na lista do painel como "Aguardando pareamento".
+Clique em "Vincular" na linha dela, dê um nome, salve. Pronto — a TV já
+começa a puxar a playlist.
 
 Essa é a via recomendada pro **TV box sem câmera** (a maioria) — não dá
 pra usar o QR code de enrollment do Headwind MDM sem câmera (ver seção
@@ -118,6 +162,16 @@ Ver seção 7 — o HMDM permite empurrar o APK remotamente pra várias TVs de
 uma vez e manter modo kiosk, mas o enrollment inicial de um dispositivo
 sem câmera também precisa de um passo manual (instalar o agente do HMDM
 como APK comum, não por QR).
+
+### 6.4. Opção C — Play Store (planejado, ainda não publicado)
+
+O app foi desenhado pra isso: o endereço do servidor é configurado na
+tela inicial do app (seção 6.1), não fixado no APK — então, uma vez
+publicado, instalar via Play Store seria só buscar "CLKCast", instalar,
+abrir e digitar o endereço do servidor, sem precisar de ADB nem HMDM.
+Isso ainda não foi feito (falta build assinado — `assembleRelease` +
+keystore, ver nota da seção 6.1 — e a ficha/publicação em si na Play
+Console). Ver [`docs/arquitetura.md`](arquitetura.md#distribuição-do-app-nas-tvs).
 
 ## 7. Headwind MDM (opcional)
 
@@ -195,9 +249,10 @@ Passos (via Android Studio, mais simples que linha de comando):
 4. Inicie o emulador.
 5. Instale o app: `adb install app-debug.apk` (o emulador já aparece
    como device no `adb devices`).
-6. Configure `CLKCAST_API_BASE_URL=http://10.0.2.2:8000/` antes de
-   buildar — `10.0.2.2` é como o emulador acessa o `localhost` da sua
-   máquina.
+6. Na tela de configuração de servidor que abre no primeiro uso, digite
+   `http://10.0.2.2:8000/` (já vem pré-preenchido, default de
+   `CLKCAST_API_BASE_URL`) — é como o emulador acessa o `localhost` da
+   sua máquina.
 
 **✅ Validado neste projeto** com um AVD Android TV real (`android-36;
 android-tv;x86_64`, 1920x1080, sem câmera, D-pad): o app renderizou em
@@ -253,7 +308,10 @@ Foi assim que o teste desta seção foi feito neste projeto (sem
 - **QR code do HMDM não abre / erro de conexão**: confira se
   `HMDM_BASE_DOMAIN` bate com a porta que o serviço está exposto (a
   porta 80 é proposital — ver `hmdm/README.md`).
-- **TV não aparece na lista depois de instalar o app**: confira se
-  `CLKCAST_API_BASE_URL` no app aponta pro IP certo do backend, e se a
-  TV está na mesma rede/consegue alcançar essa URL (teste abrindo
-  `http://<ip>:8000/health` num navegador na própria TV, se possível).
+- **TV não aparece na lista depois de instalar o app**: confira se o
+  endereço digitado na tela de configuração do app (primeira execução)
+  aponta pro IP certo do backend, e se a TV está na mesma rede/consegue
+  alcançar essa URL (teste abrindo `http://<ip>:8000/health` num
+  navegador na própria TV, se possível). Se digitou errado, reinstale o
+  app (ou limpe os dados dele) pra ver a tela de configuração de novo —
+  ainda não existe um jeito de reabri-la sem isso (ver `PROJECT.md`).
